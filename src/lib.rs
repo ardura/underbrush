@@ -67,6 +67,7 @@ struct UnderBrushParams {
     pub sat_type: EnumParam<SaturationType>,
 
     /// Compressor
+    #[id = "Comp"]
     pub comp: BoolParam,
 
     /// Console Wet/Dry
@@ -96,7 +97,7 @@ impl Default for UnderBrush {
 impl Default for UnderBrushParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(250, 200),
+            editor_state: EguiState::from_size(250, 220),
             slew: FloatParam::new(
                 "Slew",
                 0.5,
@@ -110,7 +111,7 @@ impl Default for UnderBrushParams {
             )
             .with_step_size(0.00001),
             sat_type: EnumParam::new("Type", SaturationType::Tape),
-            comp: BoolParam::new("Comp", false),
+            comp: BoolParam::new("Compression", false),
             mix: FloatParam::new(
                 "Mix",
                 0.85,
@@ -240,10 +241,9 @@ impl Plugin for UnderBrush {
                             .on_hover_text("The style of saturation");
                         });
 
-                        ui.horizontal(|ui|{
-                            ui.label(RichText::new("Compress ").font(monofont.clone()));
+                        ui.vertical_centered(|ui|{
                             ui.add(
-                                BoolButton::BoolButton::for_param(&params.comp, setter, 3.0, 1.0, monofont.clone()),
+                                BoolButton::BoolButton::for_param(&params.comp, setter, 5.0, 1.0, monofont.clone()),
                             )
                             .on_hover_text("Gentle auto compression");
                         });
@@ -302,14 +302,16 @@ impl Plugin for UnderBrush {
         _context: &mut impl ProcessContext<Self>,
     ) -> ProcessStatus {
         let slew: f32 = self.params.slew.value();
-        let overallscale = _context.transport().sample_rate / 44100.0;
+        let current_sample_rate = _context.transport().sample_rate;
+        let overallscale = current_sample_rate / 44100.0;
         
+        self.console.set_sample_rate(current_sample_rate);
         self.console.set_drive(self.params.drive.value());
         self.console.set_saturation_type(self.params.sat_type.value());
         self.console.set_crosstalk(0.03);
         self.console.set_phase_linearizer_freq(60.0);
 
-        self.compressor.set_sample_rate(_context.transport().sample_rate);
+        self.compressor.set_sample_rate(current_sample_rate);
 
         let mix = self.params.mix.value();
 

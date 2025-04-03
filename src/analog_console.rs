@@ -8,18 +8,18 @@ pub struct AnalogConsoleProcessor {
     // Saturation parameters
     drive: f32,
     saturation_type: SaturationType,
-    
+
     // Crosstalk parameters
     crosstalk_amount: f32,
-    
+
     // Internal state
     _prev_left: f32,
     _prev_right: f32,
-    
+
     // DC blocker
     _dc_blocker_left: DCBlocker,
     _dc_blocker_right: DCBlocker,
-    
+
     // Phase linearizer
     phase_linearizer_left: DCPhaseLinearizer,
     phase_linearizer_right: DCPhaseLinearizer,
@@ -48,59 +48,58 @@ impl AnalogConsoleProcessor {
     }
 
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.phase_linearizer_left.sample_rate = sample_rate;
-        self.phase_linearizer_right.sample_rate = sample_rate;
-
+        self.phase_linearizer_left.set_sample_rate(sample_rate);
+        self.phase_linearizer_right.set_sample_rate(sample_rate);
     }
-    
+
     pub fn set_drive(&mut self, drive: f32) {
         self.drive = drive.clamp(1.0, 10.0);
     }
-    
+
     pub fn set_saturation_type(&mut self, sat_type: SaturationType) {
         self.saturation_type = sat_type;
     }
-    
+
     pub fn set_crosstalk(&mut self, amount: f32) {
         self.crosstalk_amount = amount.clamp(0.0, 0.3);
     }
-    
+
     pub fn set_phase_linearizer_freq(&mut self, freq_hz: f32) {
         self.phase_linearizer_left.set_corner_frequency(freq_hz);
         self.phase_linearizer_right.set_corner_frequency(freq_hz);
     }
-    
+
     /// Process a single stereo sample
     pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
         // Apply soft saturation
         let left_sat = self.saturate(left);
         let right_sat = self.saturate(right);
-        
+
         // Apply crosstalk
         let left_cross = (1.0 - self.crosstalk_amount) * left_sat + self.crosstalk_amount * right_sat;
         let right_cross = (1.0 - self.crosstalk_amount) * right_sat + self.crosstalk_amount * left_sat;
-        
+
         // Subtle envelope following (transient smoothing)
         let left_smooth = 0.9 * left_cross + 0.1 * self._prev_left;
         let right_smooth = 0.9 * right_cross + 0.1 * self._prev_right;
-        
+
         self._prev_left = left_cross;
         self._prev_right = right_cross;
-        
+
         // Apply DC blocking to avoid unwanted offsets from the saturation
         let left_dc_blocked = self._dc_blocker_left.process(left_smooth);
         let right_dc_blocked = self._dc_blocker_right.process(right_smooth);
-        
+
         // Apply phase linearization
         let left_linearized = self.phase_linearizer_left.process(left_dc_blocked);
         let right_linearized = self.phase_linearizer_right.process(right_dc_blocked);
-        
+
         (left_linearized, right_linearized)
     }
-    
+
     fn saturate(&self, sample: f32) -> f32 {
         let driven = sample * self.drive;
-        
+
         match self.saturation_type {
             SaturationType::Tape => {
                 // Tape-style soft saturation with smooth knee
@@ -139,10 +138,10 @@ impl DCPhaseLinearizer {
     pub fn new(sample_rate: f32, corner_freq_hz: f32) -> Self {
         let allpass = AllpassFilter::new(sample_rate, corner_freq_hz);
         let delay_samples = (sample_rate / corner_freq_hz * 0.25) as usize;
-        
+
         let mut buffer = VecDeque::with_capacity(delay_samples + 1);
         buffer.resize(delay_samples, 0.0);
-        
+
         Self {
             sample_rate,
             corner_freq: corner_freq_hz,
@@ -151,46 +150,57 @@ impl DCPhaseLinearizer {
             delay_samples,
         }
     }
-    
+
+    pub fn set_sample_rate(&mut self, new_sample_rate: f32) {
+        self.sample_rate = new_sample_rate;
+        self.allpass_filter.set_sample_rate(new_sample_rate);
+        // Recalculate delay based on the new sample rate and current corner frequency
+        let new_delay = (self.sample_rate / self.corner_freq * 0.25) as usize;
+        if new_delay != self.delay_samples {
+            self.delay_samples = new_delay;
+            self.buffer.resize(self.delay_samples, 0.0);
+        }
+    }
+
     pub fn set_corner_frequency(&mut self, freq_hz: f32) {
         self.corner_freq = freq_hz.clamp(20.0, 500.0);
         self.allpass_filter.set_frequency(self.corner_freq);
-        
+
         // Recalculate delay when frequency changes
         let new_delay = (self.sample_rate / self.corner_freq * 0.25) as usize;
-        
+
         // Resize buffer if needed
         if new_delay != self.delay_samples {
             self.delay_samples = new_delay;
             self.buffer.resize(self.delay_samples, 0.0);
         }
     }
-    
+
     pub fn process(&mut self, input: f32) -> f32 {
         // Process through allpass
         let allpass_out = self.allpass_filter.process(input);
-        
+
         // Store in delay buffer
         self.buffer.push_back(allpass_out);
-        
+
         // Get delayed sample
         let delayed = if let Some(sample) = self.buffer.pop_front() {
             sample
         } else {
             0.0
         };
-        
+
         // For frequencies below corner_freq, favor the allpass output
         // For frequencies above corner_freq, favor the delayed output
         // This creates a crossover-like effect that linearizes phase in the low end
-        
+
         // We use a simple lowpass/highpass crossover
         let crossover_coeff = 0.2; // Simple crossover coefficient
         let low_mix = input * crossover_coeff + delayed * (1.0 - crossover_coeff);
         let high_mix = allpass_out;
-        
+
         // Final mix
-        low_mix + high_mix * 0.5  // Adjust the balance between low/high for desired effect
+        low_mix + high_mix * 0.5   // Adjust the balance between low/high for desired effect
     }
 }
 
@@ -204,23 +214,39 @@ pub struct AllpassFilter {
 impl AllpassFilter {
     pub fn new(sample_rate: f32, freq_hz: f32) -> Self {
         let a1 = Self::calculate_coefficient(freq_hz, sample_rate);
-        
+
         Self {
             a1,
             z1: 0.0,
             sample_rate,
         }
     }
-    
+
     fn calculate_coefficient(freq_hz: f32, sample_rate: f32) -> f32 {
         let t = (PI * freq_hz / sample_rate).tan();
         (t - 1.0) / (t + 1.0)
     }
-    
+
+    pub fn set_sample_rate(&mut self, new_sample_rate: f32) {
+        self.sample_rate = new_sample_rate;
+        // Recalculate the coefficient based on the new sample rate and current frequency
+        self.a1 = Self::calculate_coefficient(self.get_frequency(), self.sample_rate);
+    }
+
     pub fn set_frequency(&mut self, freq_hz: f32) {
         self.a1 = Self::calculate_coefficient(freq_hz, self.sample_rate);
     }
-    
+
+    pub fn get_frequency(&self) -> f32 {
+        // This is a reverse calculation of the coefficient to get the frequency.
+        // It might not be perfectly accurate due to floating-point precision,
+        // but it should be good enough for recalculating the coefficient.
+        let t_minus_one = self.a1;
+        let t_plus_one = 1.0;
+        let t = (t_minus_one + t_plus_one) / (t_plus_one - t_minus_one);
+        (self.sample_rate * t.atan()) / PI
+    }
+
     pub fn process(&mut self, input: f32) -> f32 {
         // First-order allpass formula: y[n] = a1*x[n] + x[n-1] - a1*y[n-1]
         let output = self.a1 * input + self.z1;
@@ -244,7 +270,7 @@ impl DCBlocker {
             y1: 0.0,
         }
     }
-    
+
     pub fn process(&mut self, input: f32) -> f32 {
         let output = input - self.x1 + self.r * self.y1;
         self.x1 = input;
