@@ -30,6 +30,8 @@ pub enum SaturationType {
     Tape,
     Tube,
     Transistor,
+    LDR,
+    Bypass,
 }
 
 impl AnalogConsoleProcessor {
@@ -120,7 +122,18 @@ impl AnalogConsoleProcessor {
             SaturationType::Transistor => {
                 // Transistor-style harder clipping with some curve
                 driven / (1.0 + driven.abs().powf(1.5)) * 1.2
-            }
+            },
+            SaturationType::LDR => {
+                // Simplified model of LDR behavior: resistance decreases with increasing input level.
+                let control_signal = driven.abs().clamp(0.0, 1.0);
+                let resistance = 1.0 / (0.1 + control_signal * 5.0);
+                let saturation_scaler = 0.83;
+
+                driven / (1.0 + resistance * saturation_scaler)
+            },
+            SaturationType::Bypass => {
+                driven
+            },
         }
     }
 }

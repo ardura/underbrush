@@ -100,13 +100,13 @@ impl Default for UnderBrushParams {
             editor_state: EguiState::from_size(250, 220),
             slew: FloatParam::new(
                 "Slew",
-                0.5,
+                0.8,
                 FloatRange::Skewed { min: 0.00001, max: 1.0, factor: 0.3 },
             )
             .with_step_size(0.00001),
             drive: FloatParam::new(
                 "Drive",
-                0.1,
+                1.0,
                 FloatRange::Skewed { min: 0.00001, max: 10.0, factor: 0.3 },
             )
             .with_step_size(0.00001),
@@ -114,7 +114,7 @@ impl Default for UnderBrushParams {
             comp: BoolParam::new("Compression", false),
             mix: FloatParam::new(
                 "Mix",
-                0.85,
+                1.0,
                 FloatRange::Linear { min: 0.0, max: 1.0 },
             )
             .with_step_size(0.00001),
@@ -309,7 +309,7 @@ impl Plugin for UnderBrush {
         self.console.set_drive(self.params.drive.value());
         self.console.set_saturation_type(self.params.sat_type.value());
         self.console.set_crosstalk(0.03);
-        self.console.set_phase_linearizer_freq(60.0);
+        self.console.set_phase_linearizer_freq(150.0);
 
         self.compressor.set_sample_rate(current_sample_rate);
 
