@@ -67,8 +67,12 @@ impl AnalogConsoleProcessor {
     }
 
     pub fn set_phase_linearizer_freq(&mut self, freq_hz: f32) {
-        self.phase_linearizer_left.set_corner_frequency(freq_hz);
-        self.phase_linearizer_right.set_corner_frequency(freq_hz);
+        if self.phase_linearizer_left.corner_freq != freq_hz {
+            self.phase_linearizer_left.set_corner_frequency(freq_hz);
+        }
+        if self.phase_linearizer_right.corner_freq != freq_hz {
+            self.phase_linearizer_right.set_corner_frequency(freq_hz);
+        }
     }
 
     /// Process a single stereo sample

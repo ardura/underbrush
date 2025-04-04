@@ -70,6 +70,10 @@ struct UnderBrushParams {
     #[id = "Comp"]
     pub comp: BoolParam,
 
+    /// Clipper
+    #[id = "Clip at 0db"]
+    pub clip: BoolParam,
+
     /// Console Wet/Dry
     #[id = "mix"]
     pub mix: FloatParam,
@@ -97,7 +101,7 @@ impl Default for UnderBrush {
 impl Default for UnderBrushParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(250, 220),
+            editor_state: EguiState::from_size(250, 240),
             slew: FloatParam::new(
                 "Slew",
                 0.8,
@@ -112,6 +116,7 @@ impl Default for UnderBrushParams {
             .with_step_size(0.00001),
             sat_type: EnumParam::new("Type", SaturationType::Tape),
             comp: BoolParam::new("Compression", false),
+            clip: BoolParam::new("Clip at 0db", false),
             mix: FloatParam::new(
                 "Mix",
                 1.0,
@@ -241,13 +246,6 @@ impl Plugin for UnderBrush {
                             .on_hover_text("The style of saturation");
                         });
 
-                        ui.vertical_centered(|ui|{
-                            ui.add(
-                                BoolButton::BoolButton::for_param(&params.comp, setter, 5.0, 1.0, monofont.clone()),
-                            )
-                            .on_hover_text("Gentle auto compression");
-                        });
-
                         ui.horizontal(|ui|{
                             ui.label(RichText::new("Slew ").font(monofont.clone()));
                             ui.add(
@@ -257,6 +255,13 @@ impl Plugin for UnderBrush {
                             .on_hover_text("What rate of change is allowed (limiting)");
                         });
 
+                        ui.vertical_centered(|ui|{
+                            ui.add(
+                                BoolButton::BoolButton::for_param(&params.comp, setter, 5.0, 1.0, monofont.clone()),
+                            )
+                            .on_hover_text("Gentle auto compression");
+                        });
+
                         ui.horizontal(|ui|{
                             ui.label(RichText::new("Gain ").font(monofont.clone()));
                             ui.add(
@@ -264,6 +269,13 @@ impl Plugin for UnderBrush {
                                     .with_width(130.0),
                             )
                             .on_hover_text("Output gain of signal");
+                        });
+
+                        ui.vertical_centered(|ui|{
+                            ui.add(
+                                BoolButton::BoolButton::for_param(&params.clip, setter, 5.0, 1.0, monofont.clone()),
+                            )
+                            .on_hover_text("Keep signal below 0db forcefully");
                         });
 
                         ui.horizontal(|ui|{
@@ -359,8 +371,10 @@ impl Plugin for UnderBrush {
             out_r = out_r * util::db_to_gain(self.params.gain.value());
 
             // Safety for our ears
-            out_l = out_l.clamp(-0.9999, 0.9999);
-            out_r = out_r.clamp(-0.9999, 0.9999);
+            if self.params.clip.value() {
+                out_l = out_l.clamp(-0.9999, 0.9999);
+                out_r = out_r.clamp(-0.9999, 0.9999);
+            }
 
             // Mix dry/wet
             out_l = (1.0 - mix) * dry_left + mix * out_l;
