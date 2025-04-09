@@ -15,7 +15,7 @@ mod analog_console;
 mod auto_compressor;
 
 /**************************************************
- * UnderBrush v1.0.0 by Ardura
+ * UnderBrush v1.0.1 by Ardura
  *
  * Build with: cargo xtask bundle underbrush --profile release
  * Debug with: cargo xtask bundle underbrush --profile profiling
@@ -66,6 +66,10 @@ struct UnderBrushParams {
     #[id = "type"]
     pub sat_type: EnumParam<SaturationType>,
 
+    /// Linearizer Frequency
+    #[id = "Linearizer Hz"]
+    pub l_hz: FloatParam,
+
     /// Compressor
     #[id = "Comp"]
     pub comp: BoolParam,
@@ -81,6 +85,10 @@ struct UnderBrushParams {
     /// Console Signal Gain
     #[id = "gain"]
     pub gain: FloatParam,
+
+    /// Master out
+    #[id = "Master Out"]
+    pub master_out: FloatParam,
 }
 
 impl Default for UnderBrush {
@@ -101,7 +109,7 @@ impl Default for UnderBrush {
 impl Default for UnderBrushParams {
     fn default() -> Self {
         Self {
-            editor_state: EguiState::from_size(250, 240),
+            editor_state: EguiState::from_size(250, 290),
             slew: FloatParam::new(
                 "Slew",
                 0.8,
@@ -115,6 +123,12 @@ impl Default for UnderBrushParams {
             )
             .with_step_size(0.00001),
             sat_type: EnumParam::new("Type", SaturationType::Tape),
+            l_hz: FloatParam::new(
+                "Lin Hz",
+                150.0,
+                FloatRange::Linear { min: 20.0, max: 800.0 },
+            )
+            .with_step_size(1.0),
             comp: BoolParam::new("Compression", false),
             clip: BoolParam::new("Clip at 0db", false),
             mix: FloatParam::new(
@@ -127,6 +141,12 @@ impl Default for UnderBrushParams {
                 "Gain",
                 0.0,
                 FloatRange::Linear { min: -12.0, max: 12.0 },
+            )
+            .with_step_size(0.00001),
+            master_out: FloatParam::new(
+                "Master",
+                0.0,
+                FloatRange::Linear { min: -24.0, max: 24.0 },
             )
             .with_step_size(0.00001),
         }
@@ -247,6 +267,24 @@ impl Plugin for UnderBrush {
                         });
 
                         ui.horizontal(|ui|{
+                            ui.label(RichText::new("Lin Hz").font(monofont.clone()));
+                            ui.add(
+                                widgets::ParamSlider::for_param(&params.l_hz, setter)
+                                    .with_width(120.0),
+                            )
+                            .on_hover_text("Frequency Cutoff for the linearizer.
+A phase linearizer aligns
+sound frequencies in time");
+                        });
+
+                        // Fix bypass switch being LOUD
+                        if *&params.sat_type.value() == SaturationType::Bypass && *&params.drive.value() != 1.0 {
+                            setter.begin_set_parameter(&params.drive);
+                            setter.set_parameter(&params.drive, 1.0);
+                            setter.end_set_parameter(&params.drive);
+                        }
+
+                        ui.horizontal(|ui|{
                             ui.label(RichText::new("Slew ").font(monofont.clone()));
                             ui.add(
                                 widgets::ParamSlider::for_param(&params.slew, setter)
@@ -286,6 +324,15 @@ impl Plugin for UnderBrush {
                             )
                             .on_hover_text("Wet/Dry of the processing effect");
                         });
+
+                        ui.horizontal(|ui|{
+                            ui.label(RichText::new("Master").font(monofont.clone()));
+                            ui.add(
+                                widgets::ParamSlider::for_param(&params.master_out, setter)
+                                    .with_width(100.0),
+                            )
+                            .on_hover_text("Master volume of output");
+                        });
                     });
                 });
             },
@@ -321,7 +368,7 @@ impl Plugin for UnderBrush {
         self.console.set_drive(self.params.drive.value());
         self.console.set_saturation_type(self.params.sat_type.value());
         self.console.set_crosstalk(0.03);
-        self.console.set_phase_linearizer_freq(150.0);
+        self.console.set_phase_linearizer_freq(self.params.l_hz.value());
 
         self.compressor.set_sample_rate(current_sample_rate);
 

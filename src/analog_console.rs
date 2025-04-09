@@ -31,6 +31,9 @@ pub enum SaturationType {
     Tube,
     Transistor,
     LDR,
+    Cubic,
+    Quintic,
+    SoftClip,
     Bypass,
 }
 
@@ -108,12 +111,8 @@ impl AnalogConsoleProcessor {
 
         match self.saturation_type {
             SaturationType::Tape => {
-                // Tape-style soft saturation with smooth knee
-                if driven.abs() < 1.0 {
-                    driven
-                } else {
-                    (driven.abs() / driven) * (1.0 - ((-3.0 * driven.abs()).exp())) * 0.6
-                }
+                let factor = self.drive + 1.0;
+                (sample * factor).tanh() * 0.5
             },
             SaturationType::Tube => {
                 // Tube-style asymmetric saturation (warmer on positive, sharper on negative)
@@ -134,6 +133,17 @@ impl AnalogConsoleProcessor {
                 let saturation_scaler = 0.83;
 
                 driven / (1.0 + resistance * saturation_scaler)
+            },
+            SaturationType::Cubic => {
+                sample + self.drive * sample * sample * sample
+            },
+            SaturationType::Quintic => {
+                let drive1 = 0.5 * self.drive;
+                let drive2 = 0.3 * self.drive;
+                sample + drive1 * sample.powi(3) + drive2 * sample.powi(5)
+            },
+            SaturationType::SoftClip => {
+                driven / (1.0 + driven.abs())
             },
             SaturationType::Bypass => {
                 driven
@@ -172,7 +182,8 @@ impl DCPhaseLinearizer {
         self.sample_rate = new_sample_rate;
         self.allpass_filter.set_sample_rate(new_sample_rate);
         // Recalculate delay based on the new sample rate and current corner frequency
-        let new_delay = (self.sample_rate / self.corner_freq * 0.25) as usize;
+        //let new_delay = (self.sample_rate / self.corner_freq * 0.25) as usize;
+        let new_delay = (self.sample_rate / (PI * self.corner_freq) - 1.0).max(0.0) as usize;
         if new_delay != self.delay_samples {
             self.delay_samples = new_delay;
             self.buffer.resize(self.delay_samples, 0.0);
@@ -180,11 +191,12 @@ impl DCPhaseLinearizer {
     }
 
     pub fn set_corner_frequency(&mut self, freq_hz: f32) {
-        self.corner_freq = freq_hz.clamp(20.0, 500.0);
+        self.corner_freq = freq_hz.clamp(20.0, 800.0);
         self.allpass_filter.set_frequency(self.corner_freq);
 
         // Recalculate delay when frequency changes
-        let new_delay = (self.sample_rate / self.corner_freq * 0.25) as usize;
+        //let new_delay = (self.sample_rate / self.corner_freq * 0.25) as usize;
+        let new_delay = (self.sample_rate / (PI * self.corner_freq) - 1.0).max(0.0) as usize;
 
         // Resize buffer if needed
         if new_delay != self.delay_samples {
@@ -207,17 +219,11 @@ impl DCPhaseLinearizer {
             0.0
         };
 
-        // For frequencies below corner_freq, favor the allpass output
-        // For frequencies above corner_freq, favor the delayed output
-        // This creates a crossover-like effect that linearizes phase in the low end
-
-        // We use a simple lowpass/highpass crossover
-        let crossover_coeff = 0.2; // Simple crossover coefficient
-        let low_mix = input * crossover_coeff + delayed * (1.0 - crossover_coeff);
-        let high_mix = allpass_out;
-
-        // Final mix
-        low_mix + high_mix * 0.5   // Adjust the balance between low/high for desired effect
+        let crossover_coeff = 0.3;
+        let low_mix_alt = input * crossover_coeff + delayed * (1.0 - crossover_coeff);
+        let output = low_mix_alt * 0.7 + allpass_out * 0.3;
+        
+        output
     }
 }
 
